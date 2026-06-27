@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/secret-hub-core",
+    "crates/secret-hub-cli",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/huangguasky/secret-hub"
+
+[workspace.dependencies]
+anyhow = "1.0"
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+data-encoding = "2.6"
+dirs = "6.0"
+getrandom = "0.3"
+hmac = "0.12"
+rpassword = "7.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha1 = "0.10"
+thiserror = "2.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+zeroize = "1.8"

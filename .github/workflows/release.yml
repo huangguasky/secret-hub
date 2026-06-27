@@ -1,0 +1,118 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            artifact: shub-windows-x64
+            binary: target/release/shub.exe
+            archive: shub-windows-x64.zip
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact: shub-linux-x64
+            binary: target/release/shub
+            archive: shub-linux-x64.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build
+        run: cargo build --release -p shub
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
+
+      - name: Package Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -czf "${{ matrix.archive }}" -C target/release shub
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
+  build-macos:
+    name: Build macOS universal
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build Intel
+        run: cargo build --release -p shub --target x86_64-apple-darwin
+
+      - name: Build Apple Silicon
+        run: cargo build --release -p shub --target aarch64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/shub \
+            target/aarch64-apple-darwin/release/shub \
+            -output target/universal-apple-darwin/release/shub
+          chmod +x target/universal-apple-darwin/release/shub
+
+      - name: Package
+        run: tar -czf shub-macos-universal.tar.gz -C target/universal-apple-darwin/release shub
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shub-macos-universal
+          path: shub-macos-universal.tar.gz
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - build
+      - build-macos
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
