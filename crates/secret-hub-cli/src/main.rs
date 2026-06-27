@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
 use secret_hub_core::{NewSecret, SecretHub, SecretKind};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "shub")]
@@ -48,6 +49,10 @@ enum Command {
     Totp {
         #[command(subcommand)]
         command: TotpCommand,
+    },
+    Env {
+        #[command(subcommand)]
+        command: EnvCommand,
     },
 }
 
@@ -114,12 +119,56 @@ enum TotpCommand {
     Code { name: String },
 }
 
+#[derive(Debug, Subcommand)]
+enum EnvCommand {
+    Import {
+        project: String,
+        file: PathBuf,
+        #[arg(long, default_value = "default")]
+        profile: String,
+        #[arg(long)]
+        replace: bool,
+    },
+    Set {
+        project: String,
+        key: String,
+        #[arg(long)]
+        value: Option<String>,
+        #[arg(long, default_value = "default")]
+        profile: String,
+    },
+    Remove {
+        project: String,
+        key: String,
+        #[arg(long, default_value = "default")]
+        profile: String,
+    },
+    List {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        reveal: bool,
+    },
+    Render {
+        project: String,
+        #[arg(long, default_value = "default")]
+        profile: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 #[derive(Debug, Clone, ValueEnum)]
 enum EntryKind {
     Totp,
     ApiKey,
     Password,
     Token,
+    Env,
 }
 
 impl EntryKind {
@@ -129,6 +178,7 @@ impl EntryKind {
             Self::ApiKey => "api-key",
             Self::Password => "password",
             Self::Token => "token",
+            Self::Env => "env",
         }
     }
 }
@@ -199,6 +249,7 @@ fn main() -> Result<()> {
                 println!("{}", hub.totp_code(&name)?);
             }
         },
+        Command::Env { command } => run_env_command(&hub, command)?,
     }
 
     Ok(())
@@ -305,7 +356,106 @@ fn print_entry(entry: &secret_hub_core::SecretEntry, reveal: bool) {
             println!("service: {}", token.service.as_deref().unwrap_or(""));
             println!("token: {}", reveal_value(&token.token, reveal));
         }
+        SecretKind::Env(env) => {
+            println!("project: {}", env.project);
+            println!("profile: {}", env.profile);
+            println!("variables: {}", env.variables.len());
+            for variable in &env.variables {
+                println!("{}={}", variable.key, reveal_value(&variable.value, reveal));
+            }
+        }
     }
+}
+
+fn run_env_command(hub: &SecretHub, command: EnvCommand) -> Result<()> {
+    match command {
+        EnvCommand::Import {
+            project,
+            file,
+            profile,
+            replace,
+        } => {
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let entry = hub.import_env(&project, &profile, &text, replace)?;
+            let SecretKind::Env(env) = entry.kind else {
+                unreachable!("import_env always returns env entries");
+            };
+            println!(
+                "imported {} variable(s) into {}/{}",
+                env.variables.len(),
+                env.project,
+                env.profile
+            );
+        }
+        EnvCommand::Set {
+            project,
+            key,
+            value,
+            profile,
+        } => {
+            let value = value.unwrap_or_else_prompt("Value: ")?;
+            hub.set_env_var(&project, &profile, &key, value)?;
+            println!("set {key} in {project}/{profile}");
+        }
+        EnvCommand::Remove {
+            project,
+            key,
+            profile,
+        } => {
+            hub.remove_env_var(&project, &profile, &key)?;
+            println!("removed {key} from {project}/{profile}");
+        }
+        EnvCommand::List {
+            project,
+            profile,
+            reveal,
+        } => {
+            let entries = hub.list_env_profiles(project.as_deref(), profile.as_deref())?;
+            for entry in entries {
+                let SecretKind::Env(env) = entry.kind else {
+                    continue;
+                };
+                println!(
+                    "{}\t{}\t{} variable(s)",
+                    env.project,
+                    env.profile,
+                    env.variables.len()
+                );
+                if reveal {
+                    for variable in env.variables {
+                        println!("  {}={}", variable.key, variable.value);
+                    }
+                } else {
+                    for variable in env.variables {
+                        println!("  {}=********", variable.key);
+                    }
+                }
+            }
+        }
+        EnvCommand::Render {
+            project,
+            profile,
+            out,
+            force,
+        } => {
+            let rendered = hub.render_env(&project, &profile)?;
+            if let Some(out) = out {
+                if out.exists() && !force {
+                    return Err(anyhow!(
+                        "{} already exists; pass --force to overwrite",
+                        out.display()
+                    ));
+                }
+                std::fs::write(&out, rendered)
+                    .with_context(|| format!("failed to write {}", out.display()))?;
+                println!("rendered {project}/{profile} to {}", out.display());
+            } else {
+                print!("{rendered}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn reveal_value(value: &str, reveal: bool) -> String {

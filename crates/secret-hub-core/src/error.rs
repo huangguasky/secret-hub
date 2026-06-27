@@ -18,6 +18,12 @@ pub enum SecretHubError {
     UnsupportedAuthMode,
     #[error("invalid TOTP secret")]
     InvalidTotpSecret,
+    #[error("invalid .env line at {0}")]
+    InvalidEnvLine(usize),
+    #[error("invalid .env key: {0}")]
+    InvalidEnvKey(String),
+    #[error("invalid .env value")]
+    InvalidEnvValue,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]

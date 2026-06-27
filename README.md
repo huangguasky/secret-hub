@@ -30,6 +30,18 @@ shub get github --reveal
 shub totp code github
 ```
 
+Manage project `.env` profiles:
+
+```powershell
+shub env import my-app .env --profile dev --replace
+shub env set my-app API_KEY --profile dev
+shub env list --project my-app --profile dev
+shub env render my-app --profile dev --out .env --force
+```
+
+Values are stored inside the encrypted vault. Rendering writes a plaintext
+`.env` file only when requested.
+
 Use password mode when you want the tool to require login:
 
 ```powershell

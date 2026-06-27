@@ -1,9 +1,10 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    ApiKeyEntry, AuthMode, PasswordEntry, Result, SecretEntry, SecretHubError, SecretKind,
-    TokenEntry, TotpEntry, VaultData,
+    ApiKeyEntry, AuthMode, EnvProfile, EnvVariable, PasswordEntry, Result, SecretEntry,
+    SecretHubError, SecretKind, TokenEntry, TotpEntry, VaultData,
     crypto::{derive_key, encrypt_bytes, random_key, random_salt},
+    envfile::{parse_env, render_env, validate_key},
     paths::HubPaths,
     store::{
         VaultFile, clear_session, decrypt_vault_data, delete_key_file, encrypt_vault_data,
@@ -49,6 +50,13 @@ pub enum NewSecret {
         name: String,
         service: Option<String>,
         token: String,
+        tags: Vec<String>,
+        notes: Option<String>,
+    },
+    Env {
+        project: String,
+        profile: String,
+        variables: Vec<EnvVariable>,
         tags: Vec<String>,
         notes: Option<String>,
     },
@@ -283,6 +291,22 @@ impl SecretHub {
                     expires_at: None,
                 }),
             ),
+            NewSecret::Env {
+                project,
+                profile,
+                variables,
+                tags,
+                notes,
+            } => SecretEntry::new(
+                env_entry_name(&project, &profile),
+                tags,
+                notes,
+                SecretKind::Env(EnvProfile {
+                    project,
+                    profile,
+                    variables,
+                }),
+            ),
         };
         data.entries.push(entry.clone());
         self.save_data(&mut vault_file, &vault_key, data)?;
@@ -307,6 +331,119 @@ impl SecretHub {
             return Err(SecretHubError::InvalidTotpSecret);
         };
         crate::totp::generate_code(&totp.secret, totp.digits, totp.period)
+    }
+
+    pub fn list_env_profiles(
+        &self,
+        project: Option<&str>,
+        profile: Option<&str>,
+    ) -> Result<Vec<SecretEntry>> {
+        let (_, _, data) = self.load_data()?;
+        Ok(data
+            .entries
+            .into_iter()
+            .filter(|entry| match &entry.kind {
+                SecretKind::Env(env) => {
+                    project.is_none_or(|project| env.project == project)
+                        && profile.is_none_or(|profile| env.profile == profile)
+                }
+                _ => false,
+            })
+            .collect())
+    }
+
+    pub fn import_env(
+        &self,
+        project: &str,
+        profile: &str,
+        text: &str,
+        replace: bool,
+    ) -> Result<SecretEntry> {
+        let variables = parse_env(text)?;
+        if replace {
+            self.replace_env_profile(project, profile, variables)
+        } else {
+            self.merge_env_variables(project, profile, variables)
+        }
+    }
+
+    pub fn set_env_var(
+        &self,
+        project: &str,
+        profile: &str,
+        key: &str,
+        value: String,
+    ) -> Result<SecretEntry> {
+        validate_key(key)?;
+        self.merge_env_variables(
+            project,
+            profile,
+            vec![EnvVariable {
+                key: key.to_string(),
+                value,
+            }],
+        )
+    }
+
+    pub fn remove_env_var(&self, project: &str, profile: &str, key: &str) -> Result<SecretEntry> {
+        let (mut vault_file, vault_key, mut data) = self.load_data()?;
+        let index = find_env_index(&data.entries, project, profile)
+            .ok_or_else(|| SecretHubError::SecretNotFound(env_entry_name(project, profile)))?;
+        let SecretKind::Env(env) = &mut data.entries[index].kind else {
+            unreachable!("find_env_index only returns env entries");
+        };
+        let before = env.variables.len();
+        env.variables.retain(|variable| variable.key != key);
+        if before == env.variables.len() {
+            return Err(SecretHubError::SecretNotFound(key.to_string()));
+        }
+        data.entries[index].updated_at = Utc::now();
+        let entry = data.entries[index].clone();
+        self.save_data(&mut vault_file, &vault_key, data)?;
+        Ok(entry)
+    }
+
+    pub fn render_env(&self, project: &str, profile: &str) -> Result<String> {
+        let entry = self.get_env_profile(project, profile)?;
+        let SecretKind::Env(env) = entry.kind else {
+            unreachable!("get_env_profile only returns env entries");
+        };
+        Ok(render_env(&env))
+    }
+
+    fn get_env_profile(&self, project: &str, profile: &str) -> Result<SecretEntry> {
+        let (_, _, data) = self.load_data()?;
+        data.entries
+            .into_iter()
+            .find(|entry| match &entry.kind {
+                SecretKind::Env(env) => env.project == project && env.profile == profile,
+                _ => false,
+            })
+            .ok_or_else(|| SecretHubError::SecretNotFound(env_entry_name(project, profile)))
+    }
+
+    fn replace_env_profile(
+        &self,
+        project: &str,
+        profile: &str,
+        variables: Vec<EnvVariable>,
+    ) -> Result<SecretEntry> {
+        let (mut vault_file, vault_key, mut data) = self.load_data()?;
+        let entry = upsert_env_entry(&mut data, project, profile, variables, true);
+        self.save_data(&mut vault_file, &vault_key, data)?;
+        Ok(entry)
+    }
+
+    fn merge_env_variables(
+        &self,
+        project: &str,
+        profile: &str,
+        variables: Vec<EnvVariable>,
+    ) -> Result<SecretEntry> {
+        let (mut vault_file, vault_key, mut data) = self.load_data()?;
+        let entry = upsert_env_entry(&mut data, project, profile, variables, false);
+        self.save_data(&mut vault_file, &vault_key, data)?;
+        Ok(entry)
     }
 
     fn load_data(&self) -> Result<(VaultFile, [u8; 32], VaultData)> {
@@ -366,4 +503,59 @@ fn fixed_key(mut key: Vec<u8>) -> Result<[u8; 32]> {
     fixed.copy_from_slice(&key);
     key.fill(0);
     Ok(fixed)
+}
+
+fn env_entry_name(project: &str, profile: &str) -> String {
+    format!("{project}/{profile}")
+}
+
+fn find_env_index(entries: &[SecretEntry], project: &str, profile: &str) -> Option<usize> {
+    entries.iter().position(|entry| match &entry.kind {
+        SecretKind::Env(env) => env.project == project && env.profile == profile,
+        _ => false,
+    })
+}
+
+fn upsert_env_entry(
+    data: &mut VaultData,
+    project: &str,
+    profile: &str,
+    variables: Vec<EnvVariable>,
+    replace: bool,
+) -> SecretEntry {
+    if let Some(index) = find_env_index(&data.entries, project, profile) {
+        let SecretKind::Env(env) = &mut data.entries[index].kind else {
+            unreachable!("find_env_index only returns env entries");
+        };
+        if replace {
+            env.variables = variables;
+        } else {
+            for variable in variables {
+                if let Some(existing) = env
+                    .variables
+                    .iter_mut()
+                    .find(|existing| existing.key == variable.key)
+                {
+                    existing.value = variable.value;
+                } else {
+                    env.variables.push(variable);
+                }
+            }
+        }
+        data.entries[index].updated_at = Utc::now();
+        data.entries[index].clone()
+    } else {
+        let entry = SecretEntry::new(
+            env_entry_name(project, profile),
+            vec!["env".to_string()],
+            None,
+            SecretKind::Env(EnvProfile {
+                project: project.to_string(),
+                profile: profile.to_string(),
+                variables,
+            }),
+        );
+        data.entries.push(entry.clone());
+        entry
+    }
 }

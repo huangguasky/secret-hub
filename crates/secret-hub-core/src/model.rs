@@ -65,6 +65,7 @@ pub enum SecretKind {
     ApiKey(ApiKeyEntry),
     Password(PasswordEntry),
     Token(TokenEntry),
+    Env(EnvProfile),
 }
 
 impl SecretKind {
@@ -74,6 +75,7 @@ impl SecretKind {
             Self::ApiKey(_) => "api-key",
             Self::Password(_) => "password",
             Self::Token(_) => "token",
+            Self::Env(_) => "env",
         }
     }
 }
@@ -107,6 +109,29 @@ pub struct TokenEntry {
     pub service: Option<String>,
     pub token: String,
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvProfile {
+    pub project: String,
+    pub profile: String,
+    pub variables: Vec<EnvVariable>,
+}
+
+impl EnvProfile {
+    pub fn new(project: String, profile: String) -> Self {
+        Self {
+            project,
+            profile,
+            variables: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvVariable {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
