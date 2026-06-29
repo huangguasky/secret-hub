@@ -27,7 +27,8 @@ shub add token ci --token token_xxx --service github-actions
 shub add totp github --secret BASE32SECRET --issuer GitHub --account alice
 shub list
 shub get github --reveal
-shub totp code github
+shub totp github
+shub totp github --copy
 ```
 
 Manage project `.env` profiles:

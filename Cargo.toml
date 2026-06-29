@@ -12,6 +12,7 @@ repository = "https://github.com/huangguasky/secret-hub"
 
 [workspace.dependencies]
 anyhow = "1.0"
+arboard = "3.6"
 argon2 = "0.5"
 base64 = "0.22"
 chacha20poly1305 = "0.10"

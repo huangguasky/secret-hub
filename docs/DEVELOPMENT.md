@@ -109,6 +109,7 @@ Use `SECRET_HUB_HOME` to test without touching your real vault:
 $env:SECRET_HUB_HOME = "C:\tmp\secret-hub-dev"
 cargo run -p shub -- init
 cargo run -p shub -- status
+cargo run -p shub -- totp github
 ```
 
 To install the CLI locally from this repository:

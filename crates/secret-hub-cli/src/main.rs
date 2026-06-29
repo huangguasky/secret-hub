@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use secret_hub_core::{NewSecret, SecretHub, SecretKind};
 use std::path::PathBuf;
 
@@ -46,10 +46,7 @@ enum Command {
     Delete {
         name: String,
     },
-    Totp {
-        #[command(subcommand)]
-        command: TotpCommand,
-    },
+    Totp(TotpArgs),
     Env {
         #[command(subcommand)]
         command: EnvCommand,
@@ -114,9 +111,22 @@ enum AddCommand {
     },
 }
 
+#[derive(Debug, Args)]
+struct TotpArgs {
+    name: Option<String>,
+    #[arg(long)]
+    copy: bool,
+    #[command(subcommand)]
+    command: Option<TotpCommand>,
+}
+
 #[derive(Debug, Subcommand)]
 enum TotpCommand {
-    Code { name: String },
+    Code {
+        name: String,
+        #[arg(long)]
+        copy: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -244,15 +254,38 @@ fn main() -> Result<()> {
             let entry = hub.delete(&name)?;
             println!("deleted {} {}", entry.kind.label(), entry.name);
         }
-        Command::Totp { command } => match command {
-            TotpCommand::Code { name } => {
-                println!("{}", hub.totp_code(&name)?);
-            }
-        },
+        Command::Totp(args) => run_totp_command(&hub, args)?,
         Command::Env { command } => run_env_command(&hub, command)?,
     }
 
     Ok(())
+}
+
+fn run_totp_command(hub: &SecretHub, args: TotpArgs) -> Result<()> {
+    let (name, copy) = match args.command {
+        Some(TotpCommand::Code { name, copy }) => (name, copy || args.copy),
+        None => {
+            let name = args
+                .name
+                .ok_or_else(|| anyhow!("missing TOTP name; usage: shub totp <name>"))?;
+            (name, args.copy)
+        }
+    };
+    let code = hub.totp_code(&name)?;
+    if copy {
+        copy_to_clipboard(&code)?;
+        println!("copied TOTP code for {name}");
+    } else {
+        println!("{code}");
+    }
+    Ok(())
+}
+
+fn copy_to_clipboard(value: &str) -> Result<()> {
+    let mut clipboard = arboard::Clipboard::new().with_context(|| "failed to open clipboard")?;
+    clipboard
+        .set_text(value.to_string())
+        .with_context(|| "failed to copy to clipboard")
 }
 
 fn add_secret(hub: &SecretHub, command: AddCommand) -> Result<secret_hub_core::SecretEntry> {
