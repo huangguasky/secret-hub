@@ -27,9 +27,17 @@ shub add token ci --token token_xxx --service github-actions
 shub add totp github --secret BASE32SECRET --issuer GitHub --account alice
 shub list
 shub get github --reveal
+shub get password github --reveal
+shub get github --kind password --reveal
 shub totp github
 shub totp github --copy
+shub delete password github
 ```
+
+Names are unique within the same secret type. Different types may reuse the same
+name, such as a TOTP entry and password entry both named `github`. Without a
+type filter, `shub get github` prints every matching entry. Deleting always
+requires a type: `shub delete <type> <name>`.
 
 Manage project `.env` profiles:
 

@@ -208,12 +208,21 @@ impl SecretHub {
             .collect())
     }
 
-    pub fn get(&self, name: &str) -> Result<SecretEntry> {
+    pub fn get(&self, name: &str, kind: Option<&str>) -> Result<Vec<SecretEntry>> {
         let (_, _, data) = self.load_data()?;
-        data.entries
+        let entries: Vec<_> = data
+            .entries
             .into_iter()
-            .find(|entry| entry.name == name || entry.id.to_string() == name)
-            .ok_or_else(|| SecretHubError::SecretNotFound(name.to_string()))
+            .filter(|entry| {
+                (entry.name == name || entry.id.to_string() == name)
+                    && kind.is_none_or(|kind| entry.kind.label() == kind)
+            })
+            .collect();
+        if entries.is_empty() {
+            Err(SecretHubError::SecretNotFound(name.to_string()))
+        } else {
+            Ok(entries)
+        }
     }
 
     pub fn add(&self, secret: NewSecret) -> Result<SecretEntry> {
@@ -308,17 +317,27 @@ impl SecretHub {
                 }),
             ),
         };
+        if data.entries.iter().any(|existing| {
+            existing.name == entry.name && existing.kind.label() == entry.kind.label()
+        }) {
+            return Err(SecretHubError::DuplicateSecret {
+                kind: entry.kind.label().to_string(),
+                name: entry.name,
+            });
+        }
         data.entries.push(entry.clone());
         self.save_data(&mut vault_file, &vault_key, data)?;
         Ok(entry)
     }
 
-    pub fn delete(&self, name: &str) -> Result<SecretEntry> {
+    pub fn delete(&self, name: &str, kind: &str) -> Result<SecretEntry> {
         let (mut vault_file, vault_key, mut data) = self.load_data()?;
         let index = data
             .entries
             .iter()
-            .position(|entry| entry.name == name || entry.id.to_string() == name)
+            .position(|entry| {
+                (entry.name == name || entry.id.to_string() == name) && entry.kind.label() == kind
+            })
             .ok_or_else(|| SecretHubError::SecretNotFound(name.to_string()))?;
         let removed = data.entries.remove(index);
         self.save_data(&mut vault_file, &vault_key, data)?;
@@ -326,7 +345,8 @@ impl SecretHub {
     }
 
     pub fn totp_code(&self, name: &str) -> Result<String> {
-        let entry = self.get(name)?;
+        let mut entries = self.get(name, Some("totp"))?;
+        let entry = entries.remove(0);
         let SecretKind::Totp(totp) = entry.kind else {
             return Err(SecretHubError::InvalidTotpSecret);
         };

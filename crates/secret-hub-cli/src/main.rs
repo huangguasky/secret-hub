@@ -39,11 +39,15 @@ enum Command {
         kind: Option<EntryKind>,
     },
     Get {
-        name: String,
+        first: String,
+        second: Option<String>,
+        #[arg(long)]
+        kind: Option<EntryKind>,
         #[arg(long)]
         reveal: bool,
     },
     Delete {
+        kind: EntryKind,
         name: String,
     },
     Totp(TotpArgs),
@@ -191,6 +195,17 @@ impl EntryKind {
             Self::Env => "env",
         }
     }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "totp" => Some(Self::Totp),
+            "api-key" | "api_key" | "apikey" => Some(Self::ApiKey),
+            "password" => Some(Self::Password),
+            "token" => Some(Self::Token),
+            "env" => Some(Self::Env),
+            _ => None,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -246,12 +261,23 @@ fn main() -> Result<()> {
                 println!("{}\t{}\t{}", entry.id, entry.kind.label(), entry.name);
             }
         }
-        Command::Get { name, reveal } => {
-            let entry = hub.get(&name)?;
-            print_entry(&entry, reveal);
+        Command::Get {
+            first,
+            second,
+            kind,
+            reveal,
+        } => {
+            let (name, kind) = resolve_get_args(first, second, kind)?;
+            let entries = hub.get(&name, kind.as_ref().map(EntryKind::as_str))?;
+            for (index, entry) in entries.iter().enumerate() {
+                if index > 0 {
+                    println!();
+                }
+                print_entry(entry, reveal);
+            }
         }
-        Command::Delete { name } => {
-            let entry = hub.delete(&name)?;
+        Command::Delete { kind, name } => {
+            let entry = hub.delete(&name, kind.as_str())?;
             println!("deleted {} {}", entry.kind.label(), entry.name);
         }
         Command::Totp(args) => run_totp_command(&hub, args)?,
@@ -286,6 +312,24 @@ fn copy_to_clipboard(value: &str) -> Result<()> {
     clipboard
         .set_text(value.to_string())
         .with_context(|| "failed to copy to clipboard")
+}
+
+fn resolve_get_args(
+    first: String,
+    second: Option<String>,
+    kind: Option<EntryKind>,
+) -> Result<(String, Option<EntryKind>)> {
+    match (second, kind) {
+        (Some(name), None) => {
+            let kind =
+                EntryKind::parse(&first).ok_or_else(|| anyhow!("unknown secret type: {first}"))?;
+            Ok((name, Some(kind)))
+        }
+        (Some(_), Some(_)) => Err(anyhow!(
+            "pass either `shub get <type> <name>` or `shub get <name> --kind <type>`, not both"
+        )),
+        (None, kind) => Ok((first, kind)),
+    }
 }
 
 fn add_secret(hub: &SecretHub, command: AddCommand) -> Result<secret_hub_core::SecretEntry> {

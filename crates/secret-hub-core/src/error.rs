@@ -14,6 +14,8 @@ pub enum SecretHubError {
     InvalidPassword,
     #[error("secret not found: {0}")]
     SecretNotFound(String),
+    #[error("secret already exists for type {kind}: {name}")]
+    DuplicateSecret { kind: String, name: String },
     #[error("unsupported operation in current auth mode")]
     UnsupportedAuthMode,
     #[error("invalid TOTP secret")]
