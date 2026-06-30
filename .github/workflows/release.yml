@@ -1,4 +1,4 @@
-name: Release CLI
+name: Release
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
+  build-cli:
+    name: Build CLI ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -57,8 +57,8 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.archive }}
 
-  build-macos:
-    name: Build macOS universal
+  build-cli-macos:
+    name: Build CLI macOS universal
     runs-on: macos-latest
 
     steps:
@@ -97,11 +97,91 @@ jobs:
           name: shub-macos-universal
           path: shub-macos-universal.tar.gz
 
+  build-desktop:
+    name: Build desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            artifact: secret-hub-desktop-windows-x64
+            archive: secret-hub-desktop-windows-x64.zip
+            rust-targets: ""
+            build-args: ""
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact: secret-hub-desktop-linux-x64
+            archive: secret-hub-desktop-linux-x64.tar.gz
+            rust-targets: ""
+            build-args: ""
+          - name: macos-universal
+            os: macos-latest
+            artifact: secret-hub-desktop-macos-universal
+            archive: secret-hub-desktop-macos-universal.tar.gz
+            rust-targets: x86_64-apple-darwin,aarch64-apple-darwin
+            build-args: --target universal-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build desktop
+        working-directory: apps/desktop
+        run: npm run tauri:build -- ${{ matrix.build-args }}
+
+      - name: Package desktop Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "apps/desktop/src-tauri/target/release/bundle/*" -DestinationPath "${{ matrix.archive }}"
+
+      - name: Package desktop Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -czf "${{ matrix.archive }}" -C apps/desktop/src-tauri/target/release bundle
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
   release:
     name: Publish GitHub release
     needs:
-      - build
-      - build-macos
+      - build-cli
+      - build-cli-macos
+      - build-desktop
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
