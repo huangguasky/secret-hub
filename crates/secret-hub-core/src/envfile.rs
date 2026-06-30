@@ -1,4 +1,4 @@
-use crate::{EnvProfile, EnvVariable, Result, SecretHubError};
+use crate::{EnvValue, EnvVariable, Result, SecretHubError};
 
 pub fn parse_env(text: &str) -> Result<Vec<EnvVariable>> {
     let mut variables = Vec::new();
@@ -20,18 +20,18 @@ pub fn parse_env(text: &str) -> Result<Vec<EnvVariable>> {
         let value = parse_value(raw_value.trim())?;
         variables.push(EnvVariable {
             key: key.to_string(),
-            value,
+            value: EnvValue::literal(value),
         });
     }
     Ok(variables)
 }
 
-pub fn render_env(profile: &EnvProfile) -> String {
+pub fn render_env(variables: &[(String, String)]) -> String {
     let mut output = String::new();
-    for variable in &profile.variables {
-        output.push_str(&variable.key);
+    for (key, value) in variables {
+        output.push_str(key);
         output.push('=');
-        output.push_str(&render_value(&variable.value));
+        output.push_str(&render_value(value));
         output.push('\n');
     }
     output
@@ -174,31 +174,33 @@ mod tests {
 
         assert_eq!(variables.len(), 5);
         assert_eq!(variables[1].key, "API_KEY");
-        assert_eq!(variables[1].value, "abc 123");
-        assert_eq!(variables[2].value, "value#kept");
-        assert_eq!(variables[3].value, "value");
-        assert_eq!(variables[4].value, "hello world");
+        assert!(matches!(
+            &variables[1].value,
+            EnvValue::Literal { value } if value == "abc 123"
+        ));
+        assert!(matches!(
+            &variables[2].value,
+            EnvValue::Literal { value } if value == "value#kept"
+        ));
+        assert!(matches!(
+            &variables[3].value,
+            EnvValue::Literal { value } if value == "value"
+        ));
+        assert!(matches!(
+            &variables[4].value,
+            EnvValue::Literal { value } if value == "hello world"
+        ));
     }
 
     #[test]
     fn renders_values_that_need_quotes() {
-        let profile = EnvProfile {
-            project: "app".to_string(),
-            profile: "dev".to_string(),
-            variables: vec![
-                EnvVariable {
-                    key: "PLAIN".to_string(),
-                    value: "abc-123".to_string(),
-                },
-                EnvVariable {
-                    key: "SPACED".to_string(),
-                    value: "hello world".to_string(),
-                },
-            ],
-        };
+        let variables = vec![
+            ("PLAIN".to_string(), "abc-123".to_string()),
+            ("SPACED".to_string(), "hello world".to_string()),
+        ];
 
         assert_eq!(
-            render_env(&profile),
+            render_env(&variables),
             "PLAIN=abc-123\nSPACED=\"hello world\"\n"
         );
     }

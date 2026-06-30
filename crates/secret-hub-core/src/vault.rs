@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    ApiKeyEntry, AuthMode, EnvProfile, EnvVariable, PasswordEntry, Result, SecretEntry,
-    SecretHubError, SecretKind, TokenEntry, TotpEntry, VaultData,
+    ApiKeyEntry, AuthMode, EnvProfile, EnvSecretRefKind, EnvValue, EnvVariable, PasswordEntry,
+    Result, SecretEntry, SecretHubError, SecretKind, TokenEntry, TotpEntry, VaultData,
     crypto::{derive_key, encrypt_bytes, random_key, random_salt},
     envfile::{parse_env, render_env, validate_key},
     paths::HubPaths,
@@ -59,6 +59,31 @@ pub enum NewSecret {
         variables: Vec<EnvVariable>,
         tags: Vec<String>,
         notes: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum EditSecret {
+    Totp {
+        issuer: Option<String>,
+        account: Option<String>,
+        secret: Option<String>,
+        digits: Option<u32>,
+        period: Option<u64>,
+    },
+    ApiKey {
+        provider: Option<String>,
+        key: Option<String>,
+        scopes: Option<Vec<String>>,
+    },
+    Password {
+        username: Option<String>,
+        password: Option<String>,
+        url: Option<String>,
+    },
+    Token {
+        service: Option<String>,
+        token: Option<String>,
     },
 }
 
@@ -339,9 +364,28 @@ impl SecretHub {
                 (entry.name == name || entry.id.to_string() == name) && entry.kind.label() == kind
             })
             .ok_or_else(|| SecretHubError::SecretNotFound(name.to_string()))?;
+        reject_env_referenced_delete(&data.entries, &data.entries[index])?;
         let removed = data.entries.remove(index);
         self.save_data(&mut vault_file, &vault_key, data)?;
         Ok(removed)
+    }
+
+    pub fn edit(&self, name: &str, edit: EditSecret) -> Result<SecretEntry> {
+        let (mut vault_file, vault_key, mut data) = self.load_data()?;
+        let kind = edit.kind_label();
+        let index = data
+            .entries
+            .iter()
+            .position(|entry| {
+                (entry.name == name || entry.id.to_string() == name) && entry.kind.label() == kind
+            })
+            .ok_or_else(|| SecretHubError::SecretNotFound(name.to_string()))?;
+
+        apply_edit(&mut data.entries[index], edit)?;
+        data.entries[index].updated_at = Utc::now();
+        let entry = data.entries[index].clone();
+        self.save_data(&mut vault_file, &vault_key, data)?;
+        Ok(entry)
     }
 
     pub fn totp_code(&self, name: &str) -> Result<String> {
@@ -400,7 +444,32 @@ impl SecretHub {
             profile,
             vec![EnvVariable {
                 key: key.to_string(),
-                value,
+                value: EnvValue::literal(value),
+            }],
+        )
+    }
+
+    pub fn set_env_secret_ref(
+        &self,
+        project: &str,
+        profile: &str,
+        key: &str,
+        ref_kind: EnvSecretRefKind,
+        ref_name: String,
+    ) -> Result<SecretEntry> {
+        validate_key(key)?;
+        let (_, _, data) = self.load_data()?;
+        find_secret_by_ref(&data.entries, ref_kind, &ref_name)
+            .ok_or_else(|| SecretHubError::SecretNotFound(ref_name.clone()))?;
+        self.merge_env_variables(
+            project,
+            profile,
+            vec![EnvVariable {
+                key: key.to_string(),
+                value: EnvValue::SecretRef {
+                    kind: ref_kind,
+                    name: ref_name,
+                },
             }],
         )
     }
@@ -424,22 +493,20 @@ impl SecretHub {
     }
 
     pub fn render_env(&self, project: &str, profile: &str) -> Result<String> {
-        let entry = self.get_env_profile(project, profile)?;
-        let SecretKind::Env(env) = entry.kind else {
-            unreachable!("get_env_profile only returns env entries");
-        };
-        Ok(render_env(&env))
-    }
-
-    fn get_env_profile(&self, project: &str, profile: &str) -> Result<SecretEntry> {
         let (_, _, data) = self.load_data()?;
-        data.entries
-            .into_iter()
+        let entry = data
+            .entries
+            .iter()
             .find(|entry| match &entry.kind {
                 SecretKind::Env(env) => env.project == project && env.profile == profile,
                 _ => false,
             })
-            .ok_or_else(|| SecretHubError::SecretNotFound(env_entry_name(project, profile)))
+            .ok_or_else(|| SecretHubError::SecretNotFound(env_entry_name(project, profile)))?;
+        let SecretKind::Env(env) = &entry.kind else {
+            unreachable!("get_env_profile only returns env entries");
+        };
+        let variables = resolve_env_variables(&data.entries, env)?;
+        Ok(render_env(&variables))
     }
 
     fn replace_env_profile(
@@ -515,6 +582,94 @@ impl SecretHub {
     }
 }
 
+impl EditSecret {
+    fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Totp { .. } => "totp",
+            Self::ApiKey { .. } => "api-key",
+            Self::Password { .. } => "password",
+            Self::Token { .. } => "token",
+        }
+    }
+}
+
+fn apply_edit(entry: &mut SecretEntry, edit: EditSecret) -> Result<()> {
+    match (&mut entry.kind, edit) {
+        (
+            SecretKind::Totp(totp),
+            EditSecret::Totp {
+                issuer,
+                account,
+                secret,
+                digits,
+                period,
+            },
+        ) => {
+            if let Some(issuer) = issuer {
+                totp.issuer = Some(issuer);
+            }
+            if let Some(account) = account {
+                totp.account = Some(account);
+            }
+            if let Some(secret) = secret {
+                totp.secret = crate::totp::normalize_secret(&secret);
+            }
+            if let Some(digits) = digits {
+                totp.digits = digits;
+            }
+            if let Some(period) = period {
+                totp.period = period;
+            }
+        }
+        (
+            SecretKind::ApiKey(api_key),
+            EditSecret::ApiKey {
+                provider,
+                key,
+                scopes,
+            },
+        ) => {
+            if let Some(provider) = provider {
+                api_key.provider = Some(provider);
+            }
+            if let Some(key) = key {
+                api_key.key = key;
+            }
+            if let Some(scopes) = scopes {
+                api_key.scopes = scopes;
+            }
+        }
+        (
+            SecretKind::Password(password_entry),
+            EditSecret::Password {
+                username,
+                password,
+                url,
+            },
+        ) => {
+            if let Some(username) = username {
+                password_entry.username = Some(username);
+            }
+            if let Some(password) = password {
+                password_entry.password = password;
+            }
+            if let Some(url) = url {
+                password_entry.url = Some(url);
+            }
+        }
+        (SecretKind::Token(token_entry), EditSecret::Token { service, token }) => {
+            if let Some(service) = service {
+                token_entry.service = Some(service);
+            }
+            if let Some(token) = token {
+                token_entry.token = token;
+            }
+        }
+        _ => return Err(SecretHubError::SecretNotFound(entry.name.clone())),
+    }
+    Ok(())
+}
+
 fn fixed_key(mut key: Vec<u8>) -> Result<[u8; 32]> {
     if key.len() != 32 {
         return Err(SecretHubError::Crypto);
@@ -578,4 +733,83 @@ fn upsert_env_entry(
         data.entries.push(entry.clone());
         entry
     }
+}
+
+fn resolve_env_variables(
+    entries: &[SecretEntry],
+    env: &EnvProfile,
+) -> Result<Vec<(String, String)>> {
+    env.variables
+        .iter()
+        .map(|variable| {
+            let value = match &variable.value {
+                EnvValue::Literal { value } => value.clone(),
+                EnvValue::SecretRef { kind, name } => {
+                    read_secret_ref_value(entries, *kind, name)
+                        .ok_or_else(|| SecretHubError::SecretNotFound(ref_label(*kind, name)))?
+                }
+            };
+            Ok((variable.key.clone(), value))
+        })
+        .collect()
+}
+
+fn read_secret_ref_value(
+    entries: &[SecretEntry],
+    kind: EnvSecretRefKind,
+    name: &str,
+) -> Option<String> {
+    let entry = find_secret_by_ref(entries, kind, name)?;
+    match (&entry.kind, kind) {
+        (SecretKind::ApiKey(api_key), EnvSecretRefKind::ApiKey) => Some(api_key.key.clone()),
+        (SecretKind::Token(token), EnvSecretRefKind::Token) => Some(token.token.clone()),
+        _ => None,
+    }
+}
+
+fn find_secret_by_ref<'a>(
+    entries: &'a [SecretEntry],
+    kind: EnvSecretRefKind,
+    name: &str,
+) -> Option<&'a SecretEntry> {
+    entries.iter().find(|entry| {
+        entry.kind.label() == kind.label() && (entry.name == name || entry.id.to_string() == name)
+    })
+}
+
+fn reject_env_referenced_delete(entries: &[SecretEntry], target: &SecretEntry) -> Result<()> {
+    let ref_kind = match &target.kind {
+        SecretKind::ApiKey(_) => EnvSecretRefKind::ApiKey,
+        SecretKind::Token(_) => EnvSecretRefKind::Token,
+        _ => return Ok(()),
+    };
+
+    let mut references = Vec::new();
+    for entry in entries {
+        let SecretKind::Env(env) = &entry.kind else {
+            continue;
+        };
+        for variable in &env.variables {
+            let EnvValue::SecretRef { kind, name } = &variable.value else {
+                continue;
+            };
+            if *kind == ref_kind && (name == &target.name || name == &target.id.to_string()) {
+                references.push(format!("{}/{}:{}", env.project, env.profile, variable.key));
+            }
+        }
+    }
+
+    if references.is_empty() {
+        return Ok(());
+    }
+
+    Err(SecretHubError::SecretInUseByEnv {
+        kind: target.kind.label().to_string(),
+        name: target.name.clone(),
+        references: references.join(", "),
+    })
+}
+
+fn ref_label(kind: EnvSecretRefKind, name: &str) -> String {
+    format!("{} {name}", kind.label())
 }

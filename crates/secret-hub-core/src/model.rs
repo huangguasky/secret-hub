@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,7 +131,82 @@ impl EnvProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvVariable {
     pub key: String,
-    pub value: String,
+    pub value: EnvValue,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+pub enum EnvValue {
+    Literal {
+        value: String,
+    },
+    SecretRef {
+        kind: EnvSecretRefKind,
+        name: String,
+    },
+}
+
+impl EnvValue {
+    pub fn literal(value: String) -> Self {
+        Self::Literal { value }
+    }
+}
+
+impl<'de> Deserialize<'de> for EnvValue {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum EnvValueCompat {
+            LegacyLiteral(String),
+            Tagged {
+                source: String,
+                value: Option<String>,
+                kind: Option<EnvSecretRefKind>,
+                name: Option<String>,
+            },
+        }
+
+        match EnvValueCompat::deserialize(deserializer)? {
+            EnvValueCompat::LegacyLiteral(value) => Ok(EnvValue::Literal { value }),
+            EnvValueCompat::Tagged {
+                source,
+                value,
+                kind,
+                name,
+            } => match source.as_str() {
+                "literal" => Ok(EnvValue::Literal {
+                    value: value.unwrap_or_default(),
+                }),
+                "secret-ref" => Ok(EnvValue::SecretRef {
+                    kind: kind.ok_or_else(|| serde::de::Error::missing_field("kind"))?,
+                    name: name.ok_or_else(|| serde::de::Error::missing_field("name"))?,
+                }),
+                _ => Err(serde::de::Error::unknown_variant(
+                    &source,
+                    &["literal", "secret-ref"],
+                )),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnvSecretRefKind {
+    ApiKey,
+    Token,
+}
+
+impl EnvSecretRefKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ApiKey => "api-key",
+            Self::Token => "token",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

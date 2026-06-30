@@ -31,6 +31,10 @@ shub get password github --reveal
 shub get github --kind password --reveal
 shub totp github
 shub totp github --copy
+shub edit api-key github --key ghp_new --scopes repo,read:user
+shub edit password github --password new_password
+shub edit token ci --token token_new
+shub edit totp github --secret NEWBASE32SECRET --issuer GitHub
 shub delete password github
 ```
 
@@ -44,12 +48,32 @@ Manage project `.env` profiles:
 ```powershell
 shub env import my-app .env --profile dev --replace
 shub env set my-app API_KEY --profile dev
+shub env set-ref my-app GITHUB_TOKEN github --kind token --profile dev
 shub env list --project my-app --profile dev
 shub env render my-app --profile dev --out .env --force
 ```
 
+```mermaid
+flowchart TD
+    FileIn["file: .env / .env.local"] -->|"shub env import <project> <file> --profile <profile>"| Profile
+    Project["project: my-app"] --> Profile["profile: dev"]
+    Project --> ProfileProd["profile: prod"]
+    Profile --> VarA["API_KEY = literal value"]
+    Profile --> VarB["GITHUB_TOKEN = ref:token:github"]
+    ProfileProd --> VarC["API_URL = literal value"]
+    Profile -->|"shub env render <project> --profile <profile> --out <file>"| FileOut["file: .env"]
+```
+
+`project` is the top-level app or repository name inside the vault. `profile`
+is one environment under that project, such as `dev`, `test`, or `prod`.
+`file` is only the external plaintext `.env` file used when importing from disk
+or rendering back to disk.
+
 Values are stored inside the encrypted vault. Rendering writes a plaintext
-`.env` file only when requested.
+`.env` file only when requested. `set-ref` stores a reference to an existing
+`api-key` or `token`; rendering resolves that reference to the current secret
+value. A referenced `api-key` or `token` cannot be deleted until the `.env`
+reference is removed or changed.
 
 Use password mode when you want the tool to require login:
 

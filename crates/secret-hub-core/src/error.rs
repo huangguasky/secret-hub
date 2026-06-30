@@ -16,6 +16,12 @@ pub enum SecretHubError {
     SecretNotFound(String),
     #[error("secret already exists for type {kind}: {name}")]
     DuplicateSecret { kind: String, name: String },
+    #[error("cannot delete {kind} {name}; referenced by env variable(s): {references}")]
+    SecretInUseByEnv {
+        kind: String,
+        name: String,
+        references: String,
+    },
     #[error("unsupported operation in current auth mode")]
     UnsupportedAuthMode,
     #[error("invalid TOTP secret")]

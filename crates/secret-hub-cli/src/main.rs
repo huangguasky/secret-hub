@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use secret_hub_core::{NewSecret, SecretHub, SecretKind};
+use secret_hub_core::{EditSecret, EnvSecretRefKind, EnvValue, NewSecret, SecretHub, SecretKind};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -33,6 +33,10 @@ enum Command {
     Add {
         #[command(subcommand)]
         command: AddCommand,
+    },
+    Edit {
+        #[command(subcommand)]
+        command: EditCommand,
     },
     List {
         #[arg(long)]
@@ -115,6 +119,48 @@ enum AddCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum EditCommand {
+    Totp {
+        name: String,
+        #[arg(long)]
+        secret: Option<String>,
+        #[arg(long)]
+        issuer: Option<String>,
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long)]
+        digits: Option<u32>,
+        #[arg(long)]
+        period: Option<u64>,
+    },
+    ApiKey {
+        name: String,
+        #[arg(long)]
+        key: Option<String>,
+        #[arg(long)]
+        provider: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        scopes: Vec<String>,
+    },
+    Password {
+        name: String,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+    },
+    Token {
+        name: String,
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        service: Option<String>,
+    },
+}
+
 #[derive(Debug, Args)]
 struct TotpArgs {
     name: Option<String>,
@@ -151,6 +197,15 @@ enum EnvCommand {
         #[arg(long, default_value = "default")]
         profile: String,
     },
+    SetRef {
+        project: String,
+        key: String,
+        secret_name: String,
+        #[arg(long)]
+        kind: EnvRefKind,
+        #[arg(long, default_value = "default")]
+        profile: String,
+    },
     Remove {
         project: String,
         key: String,
@@ -183,6 +238,21 @@ enum EntryKind {
     Password,
     Token,
     Env,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum EnvRefKind {
+    ApiKey,
+    Token,
+}
+
+impl From<EnvRefKind> for EnvSecretRefKind {
+    fn from(value: EnvRefKind) -> Self {
+        match value {
+            EnvRefKind::ApiKey => Self::ApiKey,
+            EnvRefKind::Token => Self::Token,
+        }
+    }
 }
 
 impl EntryKind {
@@ -255,6 +325,10 @@ fn main() -> Result<()> {
             let entry = add_secret(&hub, command)?;
             println!("added {} {}", entry.kind.label(), entry.name);
         }
+        Command::Edit { command } => {
+            let entry = edit_secret(&hub, command)?;
+            println!("edited {} {}", entry.kind.label(), entry.name);
+        }
         Command::List { kind } => {
             let entries = hub.list(kind.as_ref().map(EntryKind::as_str))?;
             for entry in entries {
@@ -285,6 +359,64 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn edit_secret(hub: &SecretHub, command: EditCommand) -> Result<secret_hub_core::SecretEntry> {
+    let (name, edit) = match command {
+        EditCommand::Totp {
+            name,
+            secret,
+            issuer,
+            account,
+            digits,
+            period,
+        } => (
+            name,
+            EditSecret::Totp {
+                issuer,
+                account,
+                secret,
+                digits,
+                period,
+            },
+        ),
+        EditCommand::ApiKey {
+            name,
+            key,
+            provider,
+            scopes,
+        } => (
+            name,
+            EditSecret::ApiKey {
+                provider,
+                key,
+                scopes: if scopes.is_empty() {
+                    None
+                } else {
+                    Some(scopes)
+                },
+            },
+        ),
+        EditCommand::Password {
+            name,
+            username,
+            password,
+            url,
+        } => (
+            name,
+            EditSecret::Password {
+                username,
+                password,
+                url,
+            },
+        ),
+        EditCommand::Token {
+            name,
+            token,
+            service,
+        } => (name, EditSecret::Token { service, token }),
+    };
+    hub.edit(&name, edit).map_err(Into::into)
 }
 
 fn run_totp_command(hub: &SecretHub, args: TotpArgs) -> Result<()> {
@@ -438,7 +570,11 @@ fn print_entry(entry: &secret_hub_core::SecretEntry, reveal: bool) {
             println!("profile: {}", env.profile);
             println!("variables: {}", env.variables.len());
             for variable in &env.variables {
-                println!("{}={}", variable.key, reveal_value(&variable.value, reveal));
+                println!(
+                    "{}={}",
+                    variable.key,
+                    env_value_display(&variable.value, reveal)
+                );
             }
         }
     }
@@ -475,6 +611,20 @@ fn run_env_command(hub: &SecretHub, command: EnvCommand) -> Result<()> {
             hub.set_env_var(&project, &profile, &key, value)?;
             println!("set {key} in {project}/{profile}");
         }
+        EnvCommand::SetRef {
+            project,
+            key,
+            secret_name,
+            kind,
+            profile,
+        } => {
+            let ref_kind = EnvSecretRefKind::from(kind);
+            hub.set_env_secret_ref(&project, &profile, &key, ref_kind, secret_name.clone())?;
+            println!(
+                "set {key} in {project}/{profile} as ref:{}:{secret_name}",
+                ref_kind.label()
+            );
+        }
         EnvCommand::Remove {
             project,
             key,
@@ -501,11 +651,19 @@ fn run_env_command(hub: &SecretHub, command: EnvCommand) -> Result<()> {
                 );
                 if reveal {
                     for variable in env.variables {
-                        println!("  {}={}", variable.key, variable.value);
+                        println!(
+                            "  {}={}",
+                            variable.key,
+                            env_value_display(&variable.value, true)
+                        );
                     }
                 } else {
                     for variable in env.variables {
-                        println!("  {}=********", variable.key);
+                        println!(
+                            "  {}={}",
+                            variable.key,
+                            env_value_display(&variable.value, false)
+                        );
                     }
                 }
             }
@@ -542,6 +700,13 @@ fn reveal_value(value: &str, reveal: bool) -> String {
         String::new()
     } else {
         "********".to_string()
+    }
+}
+
+fn env_value_display(value: &EnvValue, reveal: bool) -> String {
+    match value {
+        EnvValue::Literal { value } => reveal_value(value, reveal),
+        EnvValue::SecretRef { kind, name } => format!("<ref:{}:{}>", kind.label(), name),
     }
 }
 
