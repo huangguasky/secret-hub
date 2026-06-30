@@ -122,3 +122,36 @@ If macOS blocks an unsigned downloaded binary, remove the quarantine attribute:
 ```bash
 xattr -d com.apple.quarantine "$HOME/bin/shub"
 ```
+
+## Desktop Client
+
+The desktop client lives in `apps/desktop` and uses Tauri + Vue + TypeScript.
+It reuses `secret-hub-core`, so Windows and macOS clients operate on the same
+local encrypted vault as the CLI.
+
+Development:
+
+```powershell
+cd apps/desktop
+npm.cmd install
+npm.cmd run tauri:dev
+```
+
+On macOS, use `npm` instead of `npm.cmd`:
+
+```bash
+cd apps/desktop
+npm install
+npm run tauri:dev
+```
+
+Build installers or app bundles:
+
+```powershell
+cd apps/desktop
+npm.cmd run tauri:build
+```
+
+macOS distribution outside local development requires Apple code signing and
+notarization. Windows distribution should use a signed installer before public
+release.
