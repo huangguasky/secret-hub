@@ -7,6 +7,7 @@ import EnvDialog from "./components/EnvDialog.vue";
 import SecretDetail from "./components/SecretDetail.vue";
 import SecretDialog from "./components/SecretDialog.vue";
 import SecretList from "./components/SecretList.vue";
+import SettingsDialog from "./components/SettingsDialog.vue";
 import type { DesktopStatus, EditableKind, EntryKind, EnvForm, SecretEntry, SecretForm } from "./types";
 import { buildAddRequest, buildEditRequest, entryKind } from "./utils/entries";
 
@@ -24,6 +25,7 @@ const totpRemainingSeconds = ref(0);
 const renderedEnv = ref("");
 const secretDialogOpen = ref(false);
 const envDialogOpen = ref(false);
+const settingsDialogOpen = ref(false);
 const dialogMode = ref<"add" | "edit">("add");
 const dialogKind = ref<EditableKind>("password");
 const editingEntry = ref<SecretEntry | null>(null);
@@ -167,6 +169,29 @@ async function logoutVault() {
       await refreshAll();
     },
     "Vault locked",
+  );
+}
+
+async function setVaultPassword(form: { password: string; confirmPassword: string; sessionMinutes: number }) {
+  if (form.password !== form.confirmPassword) {
+    error.value = "Passwords do not match";
+    return;
+  }
+  if (!form.password) {
+    error.value = "Password cannot be empty";
+    return;
+  }
+
+  await run(
+    async () => {
+      await invoke("set_vault_password", {
+        password: form.password,
+        sessionMinutes: form.sessionMinutes,
+      });
+      settingsDialogOpen.value = false;
+      await refreshAll();
+    },
+    "Login password saved",
   );
 }
 
@@ -374,6 +399,7 @@ async function copyTotpCode() {
       @update:filter="changeFilter"
       @refresh="refreshAll"
       @lock="logoutVault"
+      @settings="settingsDialogOpen = true"
     />
 
     <section class="content">
@@ -472,6 +498,12 @@ async function copyTotpCode() {
       @close="envDialogOpen = false"
       @set-value="setEnvValue"
       @set-ref="setEnvRef"
+    />
+    <SettingsDialog
+      :open="settingsDialogOpen"
+      :busy="busy"
+      @close="settingsDialogOpen = false"
+      @set-password="setVaultPassword"
     />
   </main>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, Lock, RefreshCw } from "lucide-vue-next";
+import { KeyRound, Lock, RefreshCw, Settings } from "lucide-vue-next";
 import type { DesktopStatus, EntryKind } from "../types";
 import { kindFilters } from "../utils/entries";
 
@@ -13,6 +13,7 @@ defineEmits<{
   (event: "update:filter", value: EntryKind): void;
   (event: "refresh"): void;
   (event: "lock"): void;
+  (event: "settings"): void;
 }>();
 </script>
 
@@ -45,6 +46,15 @@ defineEmits<{
     </nav>
 
     <div class="sidebar-actions">
+      <button
+        v-if="status?.loggedIn"
+        class="icon-button"
+        title="Settings"
+        :disabled="busy"
+        @click="$emit('settings')"
+      >
+        <Settings :size="18" />
+      </button>
       <button
         class="icon-button"
         title="Refresh"

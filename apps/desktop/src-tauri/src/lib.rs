@@ -137,6 +137,20 @@ fn logout_vault(state: tauri::State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
+fn set_vault_password(
+    state: tauri::State<'_, AppState>,
+    password: String,
+    session_minutes: Option<i64>,
+) -> CommandResult<()> {
+    let hub = state
+        .hub
+        .lock()
+        .map_err(|_| "vault state is busy".to_string())?;
+    hub.set_password(&password, session_minutes.unwrap_or(30))
+        .map_err(error_message)
+}
+
+#[tauri::command]
 fn list_entries(
     state: tauri::State<'_, AppState>,
     kind: Option<String>,
@@ -384,6 +398,7 @@ pub fn run() {
             init_vault,
             login_vault,
             logout_vault,
+            set_vault_password,
             list_entries,
             get_entries,
             add_entry,

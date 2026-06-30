@@ -434,6 +434,16 @@ label span {
   font-size: 18px;
 }
 
+.settings-section {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .modal-actions {
   justify-content: flex-end;
 }
