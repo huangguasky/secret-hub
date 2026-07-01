@@ -110,21 +110,18 @@ jobs:
             archive: secret-hub-desktop-windows-x64.zip
             rust-targets: ""
             build-args: ""
-            bundle_dir: apps/desktop/src-tauri/target/release/bundle
           - name: linux-x64
             os: ubuntu-latest
             artifact: secret-hub-desktop-linux-x64
             archive: secret-hub-desktop-linux-x64.tar.gz
             rust-targets: ""
             build-args: ""
-            bundle_dir: apps/desktop/src-tauri/target/release/bundle
           - name: macos-universal
             os: macos-latest
             artifact: secret-hub-desktop-macos-universal
             archive: secret-hub-desktop-macos-universal.tar.gz
             rust-targets: x86_64-apple-darwin,aarch64-apple-darwin
             build-args: --target universal-apple-darwin
-            bundle_dir: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
 
     steps:
       - name: Checkout
@@ -161,19 +158,40 @@ jobs:
 
       - name: Build desktop
         working-directory: apps/desktop
-        env:
-          CARGO_TARGET_DIR: src-tauri/target
         run: npm run tauri:build -- ${{ matrix.build-args }}
+
+      - name: Locate desktop bundle
+        shell: bash
+        run: |
+          candidates=(
+            "target/release/bundle"
+            "target/universal-apple-darwin/release/bundle"
+            "apps/desktop/src-tauri/target/release/bundle"
+            "apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle"
+          )
+
+          for dir in "${candidates[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "BUNDLE_DIR=$dir" >> "$GITHUB_ENV"
+              echo "Located desktop bundle at $dir"
+              find "$dir" -maxdepth 2 -mindepth 1 -print
+              exit 0
+            fi
+          done
+
+          echo "Could not locate a Tauri bundle directory." >&2
+          find target apps/desktop/src-tauri -type d -name bundle -print 2>/dev/null || true
+          exit 1
 
       - name: Package desktop Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "${{ matrix.bundle_dir }}/*" -DestinationPath "${{ matrix.archive }}"
+        run: Compress-Archive -Path "$env:BUNDLE_DIR/*" -DestinationPath "${{ matrix.archive }}"
 
       - name: Package desktop Unix
         if: runner.os != 'Windows'
         shell: bash
-        run: tar -czf "${{ matrix.archive }}" -C "${{ matrix.bundle_dir }}" .
+        run: tar -czf "${{ matrix.archive }}" -C "$BUNDLE_DIR" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
