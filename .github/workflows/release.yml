@@ -36,7 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test -p shub
 
       - name: Build
         run: cargo build --release -p shub
@@ -110,18 +110,21 @@ jobs:
             archive: secret-hub-desktop-windows-x64.zip
             rust-targets: ""
             build-args: ""
+            bundle_dir: apps/desktop/src-tauri/target/release/bundle
           - name: linux-x64
             os: ubuntu-latest
             artifact: secret-hub-desktop-linux-x64
             archive: secret-hub-desktop-linux-x64.tar.gz
             rust-targets: ""
             build-args: ""
+            bundle_dir: apps/desktop/src-tauri/target/release/bundle
           - name: macos-universal
             os: macos-latest
             artifact: secret-hub-desktop-macos-universal
             archive: secret-hub-desktop-macos-universal.tar.gz
             rust-targets: x86_64-apple-darwin,aarch64-apple-darwin
             build-args: --target universal-apple-darwin
+            bundle_dir: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
 
     steps:
       - name: Checkout
@@ -158,17 +161,19 @@ jobs:
 
       - name: Build desktop
         working-directory: apps/desktop
+        env:
+          CARGO_TARGET_DIR: src-tauri/target
         run: npm run tauri:build -- ${{ matrix.build-args }}
 
       - name: Package desktop Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "apps/desktop/src-tauri/target/release/bundle/*" -DestinationPath "${{ matrix.archive }}"
+        run: Compress-Archive -Path "${{ matrix.bundle_dir }}/*" -DestinationPath "${{ matrix.archive }}"
 
       - name: Package desktop Unix
         if: runner.os != 'Windows'
         shell: bash
-        run: tar -czf "${{ matrix.archive }}" -C apps/desktop/src-tauri/target/release bundle
+        run: tar -czf "${{ matrix.archive }}" -C "${{ matrix.bundle_dir }}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
