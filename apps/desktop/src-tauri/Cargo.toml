@@ -17,3 +17,4 @@ secret-hub-core = { path = "../../../crates/secret-hub-core" }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

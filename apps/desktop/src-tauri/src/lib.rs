@@ -288,6 +288,11 @@ fn render_env_profile(
     hub.render_env(&project, &profile).map_err(error_message)
 }
 
+#[tauri::command]
+fn save_text_file(path: String, contents: String) -> CommandResult<()> {
+    std::fs::write(&path, contents).map_err(|error| format!("failed to write {path}: {error}"))
+}
+
 impl AddSecretRequest {
     fn into_new_secret(self) -> CommandResult<NewSecret> {
         let tags = self.tags.unwrap_or_default();
@@ -390,6 +395,7 @@ fn error_message(error: impl std::fmt::Display) -> String {
 pub fn run() {
     let hub = SecretHub::new().expect("failed to resolve Secret Hub paths");
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             hub: Mutex::new(hub),
         })
@@ -408,7 +414,8 @@ pub fn run() {
             set_env_value,
             set_env_ref,
             remove_env_value,
-            render_env_profile
+            render_env_profile,
+            save_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Secret Hub desktop");

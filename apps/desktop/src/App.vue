@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import AppSidebar from "./components/AppSidebar.vue";
 import EnvDetail from "./components/EnvDetail.vue";
 import EnvDialog from "./components/EnvDialog.vue";
@@ -375,6 +376,33 @@ async function renderEnv(project: string, profile: string) {
   });
 }
 
+async function copyRenderedEnv() {
+  if (!renderedEnv.value) return;
+  await run(
+    async () => {
+      await navigator.clipboard.writeText(renderedEnv.value);
+    },
+    "Rendered env copied",
+  );
+}
+
+async function saveRenderedEnv() {
+  const entry = selectedEntry.value;
+  if (!entry || !renderedEnv.value) return;
+
+  await run(
+    async () => {
+      const path = await save({
+        defaultPath: `${entry.kind.project}-${entry.kind.profile}.env`,
+        filters: [{ name: "Env file", extensions: ["env", "txt"] }],
+      });
+      if (!path) return;
+      await invoke("save_text_file", { path, contents: renderedEnv.value });
+    },
+    "Rendered env saved",
+  );
+}
+
 async function copyTotpCode() {
   const entry = selectedEntry.value;
   if (!entry) return;
@@ -473,6 +501,8 @@ async function copySecretField(payload: { label: string; value: string }) {
             @set-ref="setEnvRef"
             @remove="removeEnvValue"
             @render="renderEnv"
+            @copy-rendered="copyRenderedEnv"
+            @save-rendered="saveRenderedEnv"
           />
           <SecretDetail
             v-else-if="selectedEntry"

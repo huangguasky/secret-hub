@@ -508,13 +508,36 @@ label span {
   padding-top: 14px;
 }
 
+.rendered-env {
+  position: relative;
+  min-width: 0;
+}
+
+.rendered-env-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+
+.icon-button.inverse {
+  background: rgb(245 247 244 / 10%);
+  color: #f5f7f4;
+}
+
+.icon-button.inverse:hover {
+  background: rgb(245 247 244 / 20%);
+}
+
 pre {
   overflow: auto;
   max-height: 220px;
   border-radius: 6px;
   background: #17201b;
   color: #f5f7f4;
-  padding: 12px;
+  padding: 12px 92px 12px 12px;
 }
 
 @media (max-width: 920px) {

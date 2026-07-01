@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
-import { FileCode2, Trash2 } from "lucide-vue-next";
+import { Copy, Download, FileCode2, Trash2 } from "lucide-vue-next";
 import type { EnvForm, SecretEntry } from "../types";
 import { createEnvForm, envVariables, textField } from "../utils/entries";
 
@@ -16,6 +16,8 @@ const emit = defineEmits<{
   (event: "set-ref", form: EnvForm): void;
   (event: "remove", key: string): void;
   (event: "render", project: string, profile: string): void;
+  (event: "copy-rendered"): void;
+  (event: "save-rendered"): void;
 }>();
 
 const form = reactive<EnvForm>(createEnvForm(props.entry));
@@ -110,6 +112,16 @@ function valueText(variable: (typeof variables.value)[number]): string {
       <button :disabled="busy">Set Env Key</button>
     </form>
 
-    <pre v-if="rendered">{{ rendered }}</pre>
+    <div v-if="rendered" class="rendered-env">
+      <div class="rendered-env-actions">
+        <button class="icon-button inverse" title="Copy rendered env" :disabled="busy" @click="$emit('copy-rendered')">
+          <Copy :size="16" />
+        </button>
+        <button class="icon-button inverse" title="Save rendered env" :disabled="busy" @click="$emit('save-rendered')">
+          <Download :size="16" />
+        </button>
+      </div>
+      <pre>{{ rendered }}</pre>
+    </div>
   </section>
 </template>
