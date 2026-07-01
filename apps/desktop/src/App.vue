@@ -388,6 +388,17 @@ async function copyTotpCode() {
     "TOTP code copied",
   );
 }
+
+async function copySecretField(payload: { label: string; value: string }) {
+  if (!payload.value) return;
+
+  await run(
+    async () => {
+      await navigator.clipboard.writeText(payload.value);
+    },
+    `${payload.label} copied`,
+  );
+}
 </script>
 
 <template>
@@ -473,6 +484,7 @@ async function copyTotpCode() {
             @edit="openEditDialog"
             @delete="deleteSelected"
             @copy-code="copyTotpCode"
+            @copy-field="copySecretField"
           />
           <section v-else class="empty-state">
             <h2>No entries</h2>

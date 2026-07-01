@@ -15,12 +15,17 @@ defineEmits<{
   (event: "edit"): void;
   (event: "delete"): void;
   (event: "copy-code"): void;
+  (event: "copy-field", payload: { label: string; value: string }): void;
 }>();
 
 function displaySecret(entry: SecretEntry, showValues: boolean): string {
   const value = secretField(entry);
   if (!value) return "";
   return showValues ? value : "********";
+}
+
+function copyTitle(label: string): string {
+  return `Copy ${label}`;
 }
 </script>
 
@@ -43,7 +48,17 @@ function displaySecret(entry: SecretEntry, showValues: boolean): string {
       <dd>{{ entryKind(entry) }}</dd>
       <template v-if="entryKind(entry) === 'password'">
         <dt>Username</dt>
-        <dd>{{ textField(entry, "username") || "none" }}</dd>
+        <dd>
+          <button
+            v-if="textField(entry, 'username')"
+            class="copy-value-button"
+            :title="copyTitle('username')"
+            @click="$emit('copy-field', { label: 'Username', value: textField(entry, 'username') })"
+          >
+            {{ textField(entry, "username") }}
+          </button>
+          <template v-else>none</template>
+        </dd>
         <dt>URL</dt>
         <dd>{{ textField(entry, "url") || "none" }}</dd>
       </template>
@@ -64,7 +79,17 @@ function displaySecret(entry: SecretEntry, showValues: boolean): string {
         <dd>{{ textField(entry, "account") || "none" }}</dd>
       </template>
       <dt>Secret</dt>
-      <dd>{{ displaySecret(entry, showValues) }}</dd>
+      <dd>
+        <button
+          v-if="showValues && secretField(entry)"
+          class="copy-value-button"
+          :title="copyTitle('secret')"
+          @click="$emit('copy-field', { label: 'Secret', value: secretField(entry) })"
+        >
+          {{ displaySecret(entry, showValues) }}
+        </button>
+        <template v-else>{{ displaySecret(entry, showValues) || "none" }}</template>
+      </dd>
       <dt>Tags</dt>
       <dd>{{ entry.tags.join(", ") || "none" }}</dd>
     </dl>

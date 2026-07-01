@@ -329,6 +329,22 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.copy-value-button {
+  justify-content: flex-start;
+  min-height: auto;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: #17201b;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: left;
+}
+
+.copy-value-button:hover {
+  color: #2f5f46;
+}
+
 .code {
   font-size: 28px;
   letter-spacing: 0;
